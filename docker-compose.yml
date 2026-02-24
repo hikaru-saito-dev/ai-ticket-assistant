@@ -20,6 +20,21 @@ services:
     networks:
       - ai-ticket-network
 
+  redis:
+    image: redis:7-alpine
+    container_name: ai-ticket-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - ai-ticket-network
+
   api:
     build:
       context: .
@@ -29,10 +44,14 @@ services:
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
       - HOST=0.0.0.0
       - PORT=8000
+      - DATABASE_URL=postgresql+asyncpg://postgres:postgres@postgres:5432/ai_ticket_assistant
+      - REDIS_URL=redis://redis:6379/0
     ports:
       - "8000:8000"
     depends_on:
       postgres:
+        condition: service_healthy
+      redis:
         condition: service_healthy
     networks:
       - ai-ticket-network
@@ -65,4 +84,5 @@ networks:
 
 volumes:
   postgres_data:
+  redis_data:
 

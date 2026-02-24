@@ -1,5 +1,6 @@
-"""Pydantic models for relay endpoint."""
+"""Relay request/response schemas."""
 
+from typing import Any
 from pydantic import BaseModel, Field
 
 
@@ -12,31 +13,18 @@ class RelayRequest(BaseModel):
     content: str = Field(..., description="Message content")
     message_id: str | None = Field(None, description="Discord message ID (optional)")
 
-    class Config:
-        """Pydantic config."""
 
-        json_schema_extra = {
-            "example": {
-                "guild_id": "123456789012345678",
-                "channel_id": "987654321098765432",
-                "user_id": "111222333444555666",
-                "content": "Hello, I need help!",
-                "message_id": "999888777666555444",
-            }
-        }
+class PromptContext(BaseModel):
+    """Prompt context for AI (Phase 3)."""
+
+    system_prompt: str = ""
+    knowledge_chunks: list[dict[str, Any]] = Field(default_factory=list)
+    message_history: list[dict[str, str]] = Field(default_factory=list)
 
 
 class RelayResponse(BaseModel):
     """Response payload for message relay."""
 
+    status: str = Field(..., description="ok | limit_exceeded | error")
     reply: str = Field(..., description="AI response message")
-
-    class Config:
-        """Pydantic config."""
-
-        json_schema_extra = {
-            "example": {
-                "reply": "AI is thinking... (Phase 1 placeholder)",
-            }
-        }
-
+    prompt_context: PromptContext | None = Field(None, description="Built prompt context")

@@ -1,72 +1,132 @@
 """FastAPI backend application entry point."""
 
+import asyncio
 import logging
 import sys
 from pathlib import Path
 from contextlib import asynccontextmanager
 
-# Add project root to Python path to allow imports
-# This ensures imports work when running: python backend/main.py
+# Add project root to Python path
 project_root = Path(__file__).parent.parent.absolute()
 if str(project_root) not in sys.path:
     sys.path.insert(0, str(project_root))
 
+import structlog
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from backend.config import config
-from backend.api import health, relay
+from redis.asyncio import Redis
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from apscheduler.triggers.cron import CronTrigger
 
-# Configure logging
-logging.basicConfig(
-    level=getattr(logging, config.log_level),
-    format="[API] %(levelname)s - %(message)s",
+from backend.config import config
+from backend.api import health, relay, knowledge, usage
+from backend.db.session import async_session_factory, engine
+from backend.services.reset_service import run_daily_reset, run_monthly_reset
+
+# Structlog configuration
+structlog.configure(
+    processors=[
+        structlog.stdlib.filter_by_level,
+        structlog.stdlib.add_logger_name,
+        structlog.stdlib.add_log_level,
+        structlog.processors.TimeStamper(fmt="iso"),
+        structlog.processors.JSONRenderer(),
+    ],
+    wrapper_class=structlog.stdlib.BoundLogger,
+    context_class=dict,
+    logger_factory=structlog.stdlib.LoggerFactory(),
 )
-logger = logging.getLogger(__name__)
+logging.basicConfig(level=getattr(logging, config.log_level))
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Application lifespan manager."""
-    logger.info("Starting AI Ticket Assistant Backend...")
+    """Application lifespan: DB, Redis, migrations, scheduler."""
+    from alembic.config import Config
+    from alembic import command
+
+    log = structlog.get_logger()
+    log.info("phase", msg="Starting AI Ticket Assistant Backend")
+
+    # Redis
+    redis = Redis.from_url(config.redis_url, decode_responses=True)
+    try:
+        await redis.ping()
+    except Exception as e:
+        log.error("redis_connect_failed", error=str(e))
+        raise
+    app.state.redis = redis
+    log.info("redis_connected")
+
+    # Run Alembic migrations
+    try:
+        alembic_cfg = Config("alembic.ini")
+        alembic_cfg.set_main_option("script_location", "alembic")
+        command.upgrade(alembic_cfg, "head")
+        log.info("migrations_applied")
+    except Exception as e:
+        log.warning("migrations_skip", error=str(e))
+
+    # Scheduler for daily/monthly resets
+    scheduler = AsyncIOScheduler()
+    async def daily_job() -> None:
+        async with async_session_factory() as session:
+            await run_daily_reset(session, redis)
+
+    async def monthly_job() -> None:
+        async with async_session_factory() as session:
+            await run_monthly_reset(session, redis)
+    scheduler.add_job(
+        daily_job,
+        CronTrigger(hour=0, minute=0, timezone="UTC"),
+        id="daily_reset",
+    )
+    scheduler.add_job(
+        monthly_job,
+        CronTrigger(day=1, hour=0, minute=0, timezone="UTC"),
+        id="monthly_reset",
+    )
+    scheduler.start()
+    app.state.scheduler = scheduler
+    log.info("scheduler_started")
+
     yield
-    logger.info("Shutting down AI Ticket Assistant Backend...")
+
+    # Shutdown
+    scheduler.shutdown(wait=False)
+    await redis.aclose()
+    await engine.dispose()
+    log.info("phase", msg="Shutdown complete")
 
 
-# Create FastAPI app
 app = FastAPI(
     title="AI Ticket Assistant Backend",
     description="Backend API for AI-powered Discord ticket support bot",
-    version="0.1.0",
+    version="0.2.0",
     lifespan=lifespan,
 )
 
-# Configure CORS (allow all origins for MVP, restrict in production)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # TODO: Restrict in production
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# Register routers
 app.include_router(health.router)
 app.include_router(relay.router)
+app.include_router(knowledge.router)
+app.include_router(usage.router)
 
 
 @app.get("/")
 async def root():
-    """Root endpoint."""
-    return {
-        "service": "AI Ticket Assistant Backend",
-        "version": "0.1.0",
-        "status": "running",
-    }
+    return {"service": "AI Ticket Assistant Backend", "version": "0.2.0", "status": "running"}
 
 
 if __name__ == "__main__":
     import uvicorn
-
     uvicorn.run(
         "backend.main:app",
         host=config.host,
@@ -74,4 +134,3 @@ if __name__ == "__main__":
         reload=True,
         log_level=config.log_level.lower(),
     )
-

@@ -49,8 +49,8 @@ try:
     from backend.api import health, relay
     print("[OK] backend.api imported successfully")
     
-    from backend.models.relay import RelayRequest, RelayResponse
-    print("[OK] backend.models.relay imported successfully")
+    from backend.schemas.relay import RelayRequest, RelayResponse
+    print("[OK] backend.schemas.relay imported successfully")
     
     print("\n[OK] All backend imports successful!")
 except Exception as e:

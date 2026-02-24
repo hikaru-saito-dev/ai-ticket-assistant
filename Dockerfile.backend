@@ -11,9 +11,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY requirements-backend.txt .
 RUN pip install --no-cache-dir -r requirements-backend.txt
 
-# Copy backend code
+# Copy backend code and alembic
 COPY backend/ ./backend/
 COPY shared/ ./shared/
+COPY alembic/ ./alembic/
+COPY alembic.ini ./
 
 # Expose port
 EXPOSE 8000
