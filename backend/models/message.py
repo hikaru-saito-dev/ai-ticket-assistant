@@ -2,8 +2,11 @@
 
 import uuid
 from datetime import datetime
+
 from sqlalchemy import DateTime, ForeignKey, String, Text
+from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlalchemy.orm import Mapped, mapped_column
+
 from backend.db.base import Base
 
 
@@ -13,10 +16,10 @@ class Message(Base):
     __tablename__ = "messages"
 
     id: Mapped[uuid.UUID] = mapped_column(
-        primary_key=True, default=uuid.uuid4, type_=uuid.UUID
+        PGUUID(as_uuid=True), primary_key=True, default=uuid.uuid4
     )
     ticket_id: Mapped[uuid.UUID] = mapped_column(
-        ForeignKey("tickets.id"), nullable=False, type_=uuid.UUID
+        PGUUID(as_uuid=True), ForeignKey("tickets.id"), nullable=False
     )
     role: Mapped[str] = mapped_column(String(20), nullable=False)  # user | assistant
     content: Mapped[str] = mapped_column(Text, nullable=False)
